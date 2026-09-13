@@ -764,9 +764,13 @@ def save_content_to_db(path, site_name):
             if decision is not None:
                 image_statuses.append(decision.status)
 
+    # After the manifests, not before: write_manifests() reads directories
+    # this run never scanned, so an unreadable manifest it finds there raises
+    # its notice last, and echoing first would swallow exactly the warning
+    # that explains a cache it then cleared out.
+    cache.write_manifests()
     for notice in cache.notices:
         click.echo(notice)
-    cache.write_manifests()
     if cache.written or cache.removed:
         click.echo(
             f"Wrote {len(cache.written)} and removed {len(cache.removed)} file(s) "

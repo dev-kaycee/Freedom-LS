@@ -243,22 +243,24 @@ class ImageCache:
         self._current = cache_dir
 
         stored_name = file_path.with_suffix(WEBP_SUFFIX).name
-        self._check_claim(cache_dir, stored_name, file_path)
         entries = self._load(cache_dir)
 
         digest = source_digest(raw)
         decision = entry_to_decision(
             entries.get(file_path.name), digest, cache_dir, stored_name
         )
+        encoded_this_run = decision is None
         if decision is None:
             decision = optimise_image(raw, file_path.suffix)
+        if decision.status is ImageEncodeStatus.OPTIMISED:
+            # Claimed on the decision, not on the source suffix. Only an
+            # OPTIMISED image takes the WebP name, so photo.png beside an
+            # animated photo.gif stored whole is not a collision at all.
+            self._check_claim(cache_dir, stored_name, file_path)
             # decision.data is set together with OPTIMISED and never left
             # None for it; the check narrows the type rather than a real
             # possibility.
-            if (
-                decision.status is ImageEncodeStatus.OPTIMISED
-                and decision.data is not None
-            ):
+            if encoded_this_run and decision.data is not None:
                 stored_path = cache_dir / stored_name
                 if _write_if_changed(stored_path, decision.data):
                     self.written.add(stored_path)
@@ -284,7 +286,7 @@ class ImageCache:
         # and quietly picking a winner would serve one image's bytes against
         # the other's content on every run afterwards. This fails the run
         # rather than resolving the collision, and needs no directory
-        # listing: it fires for exactly the files the cache is asked about.
+        # listing: it fires for exactly the images that take a WebP name.
         #
         # Case-sensitive on purpose. Photo.JPG beside photo.png collides only
         # on a case-insensitive filesystem, where the git checkout collides

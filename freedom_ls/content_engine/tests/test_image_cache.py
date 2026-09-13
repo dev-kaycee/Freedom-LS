@@ -492,3 +492,52 @@ def test_manifest_with_multiple_entries_has_no_yaml_anchors_or_aliases(
     assert isinstance(entry_b, dict)
     assert entry_a["encode_constants"] == ENCODE_CONSTANTS
     assert entry_b["encode_constants"] == ENCODE_CONSTANTS
+
+
+def test_passthrough_beside_same_named_optimised_source_is_not_a_collision(
+    tmp_path: Path,
+) -> None:
+    gif_path = tmp_path / "banner.gif"
+    png_path = tmp_path / "banner.png"
+    gif_raw = animated_gif_bytes()
+    png_raw = png_bytes()
+    gif_path.write_bytes(gif_raw)
+    png_path.write_bytes(png_raw)
+    cache = ImageCache(tmp_path)
+
+    gif_decision = cache.decide(gif_path, gif_raw)
+    png_decision = cache.decide(png_path, png_raw)
+    cache.write_manifests()
+
+    # The animated GIF is stored whole under its own name, so banner.webp is
+    # the PNG's alone and there is nothing for the two to fight over.
+    assert gif_decision.status is ImageEncodeStatus.PASSTHROUGH
+    assert png_decision.status is ImageEncodeStatus.OPTIMISED
+    entries, error = read_manifest(tmp_path / CACHE_DIR_NAME / MANIFEST_NAME)
+    assert error is None
+    assert set(entries) == {"banner.gif", "banner.png"}
+
+
+def test_unreadable_manifest_in_an_unscanned_directory_notices_during_write(
+    tmp_path: Path,
+) -> None:
+    scanned = tmp_path / "scanned"
+    scanned.mkdir()
+    raw = already_minimal_png_bytes()
+    file_path = scanned / "tiny.png"
+    file_path.write_bytes(raw)
+    unscanned_cache_dir = tmp_path / "unscanned" / CACHE_DIR_NAME
+    unscanned_cache_dir.mkdir(parents=True)
+    (unscanned_cache_dir / MANIFEST_NAME).write_text("- one\n- two\n", encoding="utf-8")
+
+    cache = ImageCache(tmp_path)
+    cache.decide(file_path, raw)
+    notices_before_write = list(cache.notices)
+    cache.write_manifests()
+
+    # write_manifests() reads directories decide() never visited, so it can
+    # raise the run's only notice. Anything reporting cache.notices has to
+    # read them after this call, not before.
+    assert notices_before_write == []
+    assert len(cache.notices) == 1
+    assert f"{CACHE_DIR_NAME}/{MANIFEST_NAME}" in cache.notices[0]
